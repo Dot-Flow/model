@@ -5,3 +5,5 @@ khKey.pem
 vego_SSH.pem
 .venv/
 buildspec.yml
+/test
+dotflow_keypair.pem
