@@ -1,14 +1,7 @@
 import difflib
-import numpy as np
 import json
 
-def generate_ground_truth(extracted_json):
-    # 1. 점자 문자열과 수정된 텍스트의 번역
-    predicted_brl = extracted_json['prediction']['brl']
-    corrected_brl = extracted_json['correction']['brl']
-    image_coordinates = extracted_json['predicton']['boxes']
-    
-    # 2. 문자열 정렬을 통한 매핑
+def generate_ground_truth(predicted_brl, corrected_brl, image_coordinates):
     matcher = difflib.SequenceMatcher(None, predicted_brl, corrected_brl)
     mapping = []
     for opcode in matcher.get_opcodes():
@@ -55,9 +48,24 @@ def generate_ground_truth(extracted_json):
     return ground_truth
 
 if __name__ == '__main__':
-    with open('extracted.json', 'r') as f:
+    with open('test.json', 'r') as f:
         extracted_json = json.load(f)
+    predicted_brl = extracted_json['prediction']['brl']
+    corrected_brl = extracted_json['correction']['brl']
+    image_coordinates = extracted_json['prediction']['boxes']
     
-    ground_truth = generate_ground_truth(extracted_json)
-    with open('ground_truth.json', 'w') as f:
-        json.dump(ground_truth, f)
+    p_brl = ""
+    c_brl = ""
+    i_list = []
+    
+    for p, c in zip(predicted_brl, corrected_brl):
+        p_brl += p + "⠀"
+        c_brl += c + "⠀"
+        
+    for i_line in image_coordinates:
+        for i_box in i_line:
+            i_list.append(i_box)
+    
+    result = generate_ground_truth(p_brl, c_brl, i_list)
+    for r in result:
+        print(r)
