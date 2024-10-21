@@ -1,127 +1,93 @@
+import difflib
 import json
 from PIL import Image, ImageDraw
 
-def calc_avg_size(boxes_by_lines):
-    total_boxes = 0
-    total_size_x = 0
-    total_size_y = 0
-    total_gap = 0
+def generate_ground_truth(predicted_brl, corrected_brl, image_coordinates):
+    matcher = difflib.SequenceMatcher(None, predicted_brl, corrected_brl)
+    mapping = []
+    for opcode in matcher.get_opcodes():
+        tag, i1, i2, j1, j2 = opcode
+        if tag == 'equal':
+            for o, c in zip(range(i1, i2), range(j1, j2)):
+                mapping.append((o, c, image_coordinates[o]))
+        elif tag == 'replace':
+            for o, c in zip(range(i1, i2), range(j1, j2)):
+                mapping.append((o, c, image_coordinates[o]))
+        elif tag == 'delete':
+            for o in range(i1, i2):
+                mapping.append((o, None, image_coordinates[o]))
+        elif tag == 'insert':
+            for c in range(j1, j2):
+                mapping.append((None, c, None))
     
-    for line in boxes_by_lines:
-        for i, box in enumerate(line):
-            if i != 0:
-                total_boxes += 1
-                total_size_x += box[2] - box[0]
-                total_size_y += box[3] - box[1]
-                total_gap += box[0] - line[i-1][2]
-                
-    return total_size_x / total_boxes, total_size_y / total_boxes, total_gap / total_boxes
-
-
-def make_box(avg_box_size_x, avg_box_size_y, avg_gap, prev_box_right, prev_box_top):
-    new_x1 = prev_box_right + avg_gap
-    new_x2 = new_x1 + avg_box_size_x
-    new_y1 = prev_box_top
-    new_y2 = new_y1 + avg_box_size_y
-    new_box = [new_x1, new_y1, new_x2, new_y2]
-    return new_box
+    # 3. 위치 정보 보완
+    # 여기서 매핑된 각 문자에 대해 이미지 좌표를 재할당하거나 보완
     
-
-def make_boxes(pred_boxes_by_lines, image_path):
-    image = Image.open(image_path)
-    draw = ImageDraw.Draw(image)
-    avg_box_size_x, avg_box_size_y, avg_gap = calc_avg_size(pred_boxes_by_lines)
+    # 4. 오류 유형 처리
+    ground_truth = []
+    for map_item in mapping:
+        o_idx, c_idx, coord = map_item
+        if o_idx is not None and c_idx is not None:
+            ground_truth.append({
+                'ocr_char': predicted_brl[o_idx],
+                'correct_char': corrected_brl[c_idx],
+                'coordinates': coord
+            })
+        elif o_idx is not None:
+            ground_truth.append({
+                'ocr_char': predicted_brl[o_idx],
+                'correct_char': None,
+                'coordinates': coord
+            })
+        elif c_idx is not None:
+            ground_truth.append({
+                'ocr_char': None,
+                'correct_char': corrected_brl[c_idx],
+                'coordinates': None
+            })
     
-    for i, line in enumerate(pred_boxes_by_lines):
-        for j, box in enumerate(line):
-            if j == 0:
+    return ground_truth
+
+if __name__ == '__main__':
+    with open('test.json', 'r') as f:
+        extracted_json = json.load(f)
+    predicted_brl = extracted_json['prediction']['brl']
+    corrected_brl = extracted_json['correction']['brl']
+    image_coordinates = extracted_json['prediction']['boxes']
+    
+    p_brl = ""
+    c_brl = ""
+    i_list = []
+    
+    for p in predicted_brl:
+        p_brl += p + "⠀"
+    p_brl = p_brl[:-1]
+    for c in corrected_brl:
+        c_brl += c + "⠀"
+    c_brl = c_brl[:-1]
+        
+    for i_line in image_coordinates:
+        for i_box in i_line:
+            i_list.append(i_box)
+        i_list.append(0)
+    i_list = i_list[:-1]
+    
+    img = Image.open('test.jpg')
+    draw = ImageDraw.Draw(img)
+    
+    result = generate_ground_truth(p_brl, c_brl, i_list)
+    for r in result:
+        if r['ocr_char'] != r['correct_char']:
+            print(r)
+            coordinates = r['coordinates']
+            if coordinates is None:
                 continue
-            if box == 0:
-                prev_box_right = line[j-1][2]
-                prev_box_top = line[j-1][1]
-                new_box = make_box(avg_box_size_x, avg_box_size_y, avg_gap, prev_box_right, prev_box_top)
-                draw.rectangle(new_box, outline='red')
-                line[j] = new_box
-        pred_boxes_by_lines[i] = line
-    
-    return pred_boxes_by_lines
-
-        
-def levenshtein_distance_with_path(str1, str2):
-    len1, len2 = len(str1), len(str2)
-    
-    # 초기화: 2차원 DP 테이블 및 경로 테이블 생성
-    dp = [[0] * (len2 + 1) for _ in range(len1 + 1)]
-    path = [[[] for _ in range(len2 + 1)] for _ in range(len1 + 1)]
-    
-    # 첫 번째 문자열에 대한 초기값 설정 (삽입 작업)
-    for i in range(1, len1 + 1):
-        dp[i][0] = i
-        path[i][0] = path[i-1][0] + [f"Delete '{str1[i-1]}' at position {i-1}"]
-    
-    # 두 번째 문자열에 대한 초기값 설정 (삽입 작업)
-    for j in range(1, len2 + 1):
-        dp[0][j] = j
-        path[0][j] = path[0][j-1] + [f"Insert '{str2[j-1]}' at position {j-1}"]
-    
-    # DP 테이블 및 경로 테이블 채우기
-    for i in range(1, len1 + 1):
-        for j in range(1, len2 + 1):
-            if str1[i - 1] == str2[j - 1]:
-                dp[i][j] = dp[i - 1][j - 1]  # 문자가 같으면 비용 없이 대체
-                path[i][j] = path[i - 1][j - 1]  # 경로 유지
-            else:
-                # 삭제, 삽입, 대체 중 최소 비용 선택
-                delete_cost = dp[i - 1][j] + 1
-                insert_cost = dp[i][j - 1] + 1
-                replace_cost = dp[i - 1][j - 1] + 1
-                
-                min_cost = min(delete_cost, insert_cost, replace_cost)
-                dp[i][j] = min_cost
-                
-                # 경로 추적
-                if min_cost == delete_cost:
-                    path[i][j] = path[i - 1][j] + [f"Delete '{str1[i-1]}' at position {i-1}"]
-                elif min_cost == insert_cost:
-                    path[i][j] = path[i][j - 1] + [f"Insert '{str2[j-1]}' at position {j-1}"]
-                else:
-                    path[i][j] = path[i - 1][j - 1] + [f"Replace '{str1[i-1]}' with '{str2[j-1]}' at position {i-1}"]
-
-    return dp[len1][len2], path[len1][len2]
-
-
-def feedback_gen(extracted_json):
-    pred_boxes_by_lines = extracted_json['prediction']['boxes_by_lines']
-    make_boxes(pred_boxes_by_lines)
-    
-    
-    pred_brls = extracted_json['prediction']['brl']
-    corr_brls = extracted_json['correction']['brl']
-    
-    for pred_brl, corr_brl in zip(pred_brls, corr_brls):
-        distance, operations = levenshtein_distance_with_path(pred_brl, corr_brl)
-        
-        print(f"예측: {pred_brl}")
-        print(f"수정: {corr_brl}")
-        print(f"레벤슈타인 거리: {distance}")
-        print("변환 경로:")
-        for step in operations:
-            print(step)
-        print()
-    
-
-if __name__ == "__main__":
-    extracted_json = {
-        "prediction": {
-            "brl": [
-                "⠔⠔⠶⠨⠐⠍  ⠰⠈⠠⠥⠗⠣⠡⠤⠝⠢⠵⠐  ⠕  ⠠⠏⠨⠾⠕  ⠔⠶⠨⠎⠺"
-            ]
-        },
-        "correction": {
-            "brl": [
-                "⠔⠶⠨⠐⠍ ⠰⠈⠠⠥⠗⠣⠡⠤⠝⠢⠵⠐ ⠕ ⠠⠏⠨⠾⠕ ⠔⠶⠨⠎⠺"
-            ]
-        }
-    }
-    
-    feedback_gen(extracted_json)
+            if not isinstance(coordinates, (list, tuple)):
+                coordinates = list(coordinates)
+            draw.rectangle(coordinates, outline='red')
+            char_to_draw = str(ord(r['ocr_char']) - 0x2800)
+            char_to_draw += "->"
+            char_to_draw += str(ord(r['correct_char']) - 0x2800)
+            draw.text((coordinates[0], coordinates[1] - 10), char_to_draw, fill='black')
+            
+    img.save('result.jpg')
