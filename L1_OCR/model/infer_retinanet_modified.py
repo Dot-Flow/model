@@ -257,17 +257,6 @@ class BrailleInference:
                                         process_2_sides=process_2_sides, align=align_results, draw=True, gt_rects=gt_rects)
         return results_dict
 
-
-    # def refine_boxes(self, boxes):
-    #     """
-    #     GVNC. Эмпирическая коррекция получившихся размеров чтобы исправить неточность результатов для последующей разметки
-    #     :param boxes:
-    #     :return:
-    #     """
-    #     h = boxes[:, 3:4] - boxes[:, 1:2]
-    #     coefs = torch.tensor([REFINE_COEFFS])
-    #     deltas = h * coefs
-    #     return boxes + deltas
 		
     def refine_lines(self, lines):
         """
@@ -334,8 +323,7 @@ class BrailleInference:
             'homography': hom.tolist() if hom is not None else hom,
         }
 
-        if draw:
-            results_dict.update(self.draw_results(aug_img, boxes, lines, labels, scores, False, draw_refined))
+        results_dict.update(self.draw_results(aug_img, boxes, lines, labels, scores, False, draw_refined))
         
         return results_dict
 
@@ -343,46 +331,14 @@ class BrailleInference:
         suff = '.rev' if reverse_page else ''
         aug_img = copy.deepcopy(aug_img)
         draw = PIL.ImageDraw.Draw(aug_img)
-        font_fn = str(Path(__file__).parent / "arial.ttf")
-        fntA = PIL.ImageFont.truetype(font_fn, 20)
-        fntErr = PIL.ImageFont.truetype(font_fn, 12)
-        # out_text = []
-        out_braille = []
         for ln in lines:
-            if ln.has_space_before:
-                # out_text.append('')
-                out_braille.append('')
-            s = ''
-            s_brl = ''
             for ch in ln.chars:
-                if ch.char.startswith('~') and not (draw_refined & self.DRAW_FULL_CHARS):
-                    ch.char = '~?~'
-                # if ch.char.startswith('~'):
-                #     ch.char = lt.int_to_unicode(ch.label)
-                s += ' ' * ch.spaces_before + ch.char
-                s_brl += lt.int_to_unicode(0) * ch.spaces_before + lt.int_to_unicode(ch.label)
                 draw.rectangle(list(ch.refined_box), outline='green')
-                # if draw_refined & self.DRAW_ORIGINAL:
-                #     ch_box = ch.original_box
-                #     draw.rectangle(list(ch_box), outline='blue')
-                # if (draw_refined & self.DRAW_BOTH) != self.DRAW_ORIGINAL:
-                #     ch_box = ch.refined_box
-                #     if draw_refined & self.DRAW_REFINED:
-                #         draw.rectangle(list(ch_box), outline='green')
-                # if ch.char.startswith('~'):
-                #     draw.text((ch_box[0], ch_box[3]), ch.char, font=fntErr, fill="black")
-                # else:
-                #     draw.text((ch_box[0]+5,ch_box[3]-7), ch.char, font=fntA, fill="black")
-                #score = scores[i].item()
-                #score = '{:.1f}'.format(score*10)
-                #draw.text((box[0],box[3]+12), score, font=fnt, fill='green')
-            # out_text.append(s)
-            out_braille.append(s_brl)
         return {
             'labeled_image' + suff: aug_img,
             'lines' + suff: lines,
             'text' + suff: "",
-            'braille' + suff: out_braille,
+            'braille' + suff: [],
             'dict' + suff: self.to_dict(aug_img, lines, draw_refined),
             'boxes' + suff: boxes,
             'labels' + suff: labels,
@@ -444,11 +400,10 @@ class BrailleInference:
         boxes = []
         labels = []
         
-        for s in result_dict["dict"]["shapes"]:
-            points = s["points"]
-            boxes.append([points[0][0], points[0][1], points[1][0], points[1][1]])
-            labels.append(s["label"])
-        
+        for line in result_dict["lines"]:
+            boxes.append([ch.refined_box for ch in line.chars])
+            labels.append([ch.label for ch in line.chars])
+                
         # 한국 시간대 설정
         kst = pytz.timezone('Asia/Seoul')
 
@@ -456,9 +411,11 @@ class BrailleInference:
         current_time_kst = datetime.datetime.now(kst)
         json_result = {
             "id": self.uuid_int,
+            "image_path": str(marked_image_path),
+            "date": current_time_kst.strftime("%Y-%m-%d %H:%M:%S"),
             "prediction": {
-                "boxes": boxes,
-                "labels": labels,
+                "boxes": None,
+                "labels": None,
                 "brl": None,
                 "text": None
             },
@@ -468,16 +425,12 @@ class BrailleInference:
                 "brl": None,
                 "text": None
             },
-            "image_path": str(marked_image_path),
-            "date": current_time_kst.strftime("%Y-%m-%d %H:%M:%S"),
         }
+        
+        json_result = refine_json.main(json_result, boxes, labels)
         
         with open(json_path, "w", encoding='utf-8') as f:
             json.dump(json_result, f, indent=4, ensure_ascii=False)
-        
-        json_result = refine_json.main(str(json_path))
-        
-        print(json_result["prediction"]["brl"])
         
         return json_result
     
@@ -499,7 +452,6 @@ class BrailleInference:
         os.makedirs(results_dir, exist_ok=True)
 
         self.result = self.save_results(result_dict, False, results_dir, target_stem, save_development_info)
-        print("result in infer_retinanet_mod: ", self.result)
       
         return self.result
 
