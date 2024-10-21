@@ -1,5 +1,5 @@
 import numpy as np
-
+from PIL import Image, ImageDraw
 
 def calc_avg_margin(box_lines):
     # 박스간 간격 계산
@@ -48,10 +48,13 @@ def make_new_boxes(spaces, pre_box, cur_box, avg_margin, avg_box_x):
         ])
     return new_boxes
 
-def make_spaces_by_lines(box_lines, label_lines):
+def make_spaces_by_lines(box_lines, label_lines, image_path):
     avg_box_x = calc_avg_box_x(box_lines)
     avg_margin = calc_avg_margin(box_lines)
     avg_width = avg_box_x + avg_margin
+    
+    image = Image.open(image_path)
+    draw = ImageDraw.Draw(image)
     
     # 공백 찾기
     refined_box_lines = []
@@ -71,16 +74,17 @@ def make_spaces_by_lines(box_lines, label_lines):
             
             if spaces > 0:
                 new_boxes = make_new_boxes(spaces, pre_box, cur_box, avg_margin, avg_box_x)
+                draw.rectangle(list(new_boxes), outline='blue')
                 refined_box_line.append(new_boxes)
                 for _ in range(spaces):
                     refined_label_line.append(0)
-                    
+            
             refined_box_line.append(cur_box)
             refined_label_line.append(label)    
         
         refined_box_lines.append(refined_box_line)
         refined_label_lines.append(refined_label_line)
-    
+    image.save(image_path)
     return refined_box_lines, refined_label_lines
 
 def labels_to_brl(label_lines):
@@ -94,12 +98,13 @@ def labels_to_brl(label_lines):
     
     
 def main(json_result, boxes, labels):
-    refined_boxes, refined_labels = make_spaces_by_lines(boxes, labels)
+    image_path = json_result['image_path']
+    refined_boxes, refined_labels = make_spaces_by_lines(boxes, labels, image_path)
     brl_lines = labels_to_brl(refined_labels)
     
     json_result['prediction']['boxes'] = refined_boxes
     json_result['prediction']['labels'] = refined_labels
     json_result['prediction']['brl'] = brl_lines
-    for brl in brl_lines:
-        print(brl)
+    
+    
     return json_result
