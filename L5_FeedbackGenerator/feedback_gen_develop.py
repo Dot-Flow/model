@@ -1,5 +1,6 @@
 import difflib
 import json
+from PIL import Image, ImageDraw
 
 def generate_ground_truth(predicted_brl, corrected_brl, image_coordinates):
     matcher = difflib.SequenceMatcher(None, predicted_brl, corrected_brl)
@@ -58,14 +59,42 @@ if __name__ == '__main__':
     c_brl = ""
     i_list = []
     
-    for p, c in zip(predicted_brl, corrected_brl):
+    for p in predicted_brl:
         p_brl += p + "⠀"
+    p_brl = p_brl[:-1]
+    for c in corrected_brl:
         c_brl += c + "⠀"
+    c_brl = c_brl[:-1]
         
     for i_line in image_coordinates:
         for i_box in i_line:
             i_list.append(i_box)
+        i_list.append(0)
+    i_list = i_list[:-1]
     
-    result = generate_ground_truth(p_brl, c_brl, i_list)
-    for r in result:
-        print(r)
+    print(len(p_brl), len(c_brl), len(i_list))
+            
+    img = Image.open('test.jpg')
+    draw = ImageDraw.Draw(img)
+    for i, (p, c) in enumerate(zip(p_brl, c_brl)):
+        if p != c:
+            print(f"{i}: {p} -> {c} 다름")
+            draw.rectangle(i_list[i], outline='red')
+        else:
+            print(f"{i}: {p} -> {c}")
+        
+    
+    # result = generate_ground_truth(p_brl, c_brl, i_list)
+    # for r in result:
+    #     if r['ocr_char'] != r['correct_char']:
+    #         print(r)
+    #         coordinates = r['coordinates']
+    #         if coordinates is None:
+    #             continue
+    #         if not isinstance(coordinates, (list, tuple)):
+    #             coordinates = list(coordinates)
+    #         draw.rectangle(coordinates, outline='red')
+    #         char = r['correct_char']
+    #         char_to_draw = str(ord(char) - 0x2800)
+    #         draw.text((coordinates[0], coordinates[1] - 10), char_to_draw, fill='black')
+    img.save('result.jpg')
