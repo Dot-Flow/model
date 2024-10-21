@@ -85,9 +85,7 @@ if __name__ == '__main__':
             if not isinstance(coordinates, (list, tuple)):
                 coordinates = list(coordinates)
             draw.rectangle(coordinates, outline='red')
-            char_to_draw = str(ord(r['ocr_char']) - 0x2800)
-            char_to_draw += "->"
-            char_to_draw += str(ord(r['correct_char']) - 0x2800)
+            char_to_draw = str(ord(r['ocr_char']) - 0x2800) + "->" + str(ord(r['correct_char']) - 0x2800)
             draw.text((coordinates[0], coordinates[1] - 10), char_to_draw, fill='black')
             
     img.save('result.jpg')
