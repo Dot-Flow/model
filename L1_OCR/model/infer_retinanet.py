@@ -9,7 +9,7 @@ import os
 import json
 import glob
 import sys
-import local_config
+import L1_OCR.local_config as local_config
 sys.path.append(local_config.global_3rd_party)
 from os.path import join
 from ovotools.params import AttrDict
@@ -19,6 +19,7 @@ import torch
 import timeit
 import copy
 from pathlib import Path
+import PIL.Image
 import PIL.ImageDraw
 import PIL.ImageFont
 from pathlib import Path
@@ -26,10 +27,17 @@ import zipfile
 import data_utils.data as data
 import braille_utils.letters as letters
 import braille_utils.label_tools as lt
-from model import create_model_retinanet
-import pytorch_retinanet
+import model.create_model_retinanet as create_model_retinanet
+import pytorch_retinanet as pytorch_retinanet
 import pytorch_retinanet.encoder
 import braille_utils.postprocess as postprocess
+import model.refine_json as refine_json
+import model.test as test
+
+import uuid
+import datetime
+import pytz
+import csv
 
 VALID_IMAGE_EXTENTIONS = tuple('.jpg,.jpe,.jpeg,.png,.gif,.svg,.bmp,.tiff,.tif,.jfif'.split(','))
 inference_width = 1024
@@ -55,7 +63,7 @@ class OrientationAttempts(enum.IntEnum):
 
 
 class BraileInferenceImpl(torch.nn.Module):
-    def __init__(self, params, model, device, label_is_valid, verbose=1):
+    def __init__(self, params, model, device, label_is_valid, verbose=0):
         super(BraileInferenceImpl, self).__init__()
         self.verbose = verbose
         self.device = device
@@ -210,6 +218,15 @@ class BrailleInference:
                 if verbose >= 1:
                     print("Model pth loaded")
         self.impl.to(device)
+        
+        self.uuid_int = uuid.uuid1().int
+        self.result = None
+        
+    def get_uuid(self):
+        return self.uuid_int
+    
+    def get_result(self):
+        return self.result
 
     def load_pdf(self, img_fn):
         try:
@@ -235,56 +252,11 @@ class BrailleInference:
         """
         :param img: can be 1) PIL.Image 2) filename to image (.jpg etc.) or .pdf file
         """
-        if gt_rects:
-            assert find_orientation == False, "gt_rects можно передавать только если ориентация задана"
-        t = timeit.default_timer()
-        if not isinstance(img, PIL.Image.Image):
-            try:
-                if Path(img).suffix=='.pdf':
-                    img = self.load_pdf(img)
-                else:
-                    img = PIL.Image.open(img)
-            except Exception as e:
-                return None
-        if self.verbose >= 2:
-            print("run.reading image", timeit.default_timer() - t)
-            # img.save(Path(results_dir) / 'original.jpg')
-            # img.save(Path(results_dir) / 'original_100.jpg', quality=100)
-            t = timeit.default_timer()
-        if repeat_on_aligned and not process_2_sides:
-            results_dict0 = self.run_impl(img, lang, draw_refined, find_orientation,
-                                          process_2_sides=False, align=True, draw=False, gt_rects=gt_rects)
-            if self.verbose >= 2:
-                print("run.run_impl_1", timeit.default_timer() - t)
-                # results_dict0['image'].save(Path(results_dir) / 're1.jpg')
-                # results_dict0['image'].save(Path(results_dir) / 're1_100.jpg', quality=100)
-                t = timeit.default_timer()
-            results_dict = self.run_impl(results_dict0['image'], lang, draw_refined, find_orientation=False,
-                                         process_2_sides=process_2_sides, align=False, draw=True,
-                                         gt_rects=results_dict0['gt_rects'])
-            results_dict['best_idx'] = results_dict0['best_idx']
-            results_dict['err_scores'] = results_dict0['err_scores']
-            results_dict['homography'] = results_dict0['homography']
-        else:
-            results_dict = self.run_impl(img, lang, draw_refined, find_orientation,
-                                         process_2_sides=process_2_sides, align=align_results, draw=True, gt_rects=gt_rects)
-        if self.verbose >= 2:
-            # results_dict['image'].save(Path(results_dir) / 're2.jpg')
-            # results_dict['image'].save(Path(results_dir) / 're2_100.jpg', quality=100)
-            print("run.run_impl", timeit.default_timer() - t)
+        
+        results_dict = self.run_impl(img, lang, draw_refined, find_orientation,
+                                        process_2_sides=process_2_sides, align=align_results, draw=True, gt_rects=gt_rects)
         return results_dict
 
-
-    # def refine_boxes(self, boxes):
-    #     """
-    #     GVNC. Эмпирическая коррекция получившихся размеров чтобы исправить неточность результатов для последующей разметки
-    #     :param boxes:
-    #     :return:
-    #     """
-    #     h = boxes[:, 3:4] - boxes[:, 1:2]
-    #     coefs = torch.tensor([REFINE_COEFFS])
-    #     deltas = h * coefs
-    #     return boxes + deltas
 		
     def refine_lines(self, lines):
         """
@@ -302,6 +274,7 @@ class BrailleInference:
     def run_impl(self, img, lang, draw_refined, find_orientation, process_2_sides, align, draw, gt_rects=[]):
         t = timeit.default_timer()
         np_img = np.asarray(img)
+        
         if (len(np_img.shape) > 2 and np_img.shape[2] < 3):  # grayscale -> reduce dim
             np_img = np_img[:,:,0]
         aug_img, aug_gt_rects = self.preprocessor.preprocess_and_augment(np_img, gt_rects)
@@ -315,18 +288,11 @@ class BrailleInference:
             aug_img_rot = self.preprocessor.preprocess_and_augment(np_img_rot)[0]
             aug_img_rot = data.unify_shape(aug_img_rot)
             input_tensor_rotated = self.preprocessor.to_normalized_tensor(aug_img_rot, device=self.impl.device)
-
-        if self.verbose >= 2:
-            print("    run_impl.make_batch", timeit.default_timer() - t)
-            t = timeit.default_timer()
-
+        
         with torch.no_grad():
             boxes, labels, scores, best_idx, err_score, boxes2, labels2, scores2 = self.impl(
                 input_tensor, input_tensor_rotated, find_orientation=find_orientation, process_2_sides=process_2_sides)
-        if self.verbose >= 2:
-            print("    run_impl.impl", timeit.default_timer() - t)
-            t = timeit.default_timer()
-
+        
         #boxes = self.refine_boxes(boxes)
         boxes = boxes.tolist()
         labels = labels.tolist()
@@ -334,23 +300,9 @@ class BrailleInference:
         lines = postprocess.boxes_to_lines(boxes, labels, lang = lang)
         self.refine_lines(lines)
 
-        if process_2_sides:
-            #boxes2 = self.refine_boxes(boxes2)
-            boxes2 = boxes2.tolist()
-            labels2 = labels2.tolist()
-            scores2 = scores2.tolist()
-            lines2 = postprocess.boxes_to_lines(boxes2, labels2, lang=lang)
-            self.refine_lines(lines2)
-
         aug_img = PIL.Image.fromarray(aug_img if best_idx < OrientationAttempts.ROT90 else aug_img_rot)
         if best_idx in (OrientationAttempts.ROT180, OrientationAttempts.ROT270):
             aug_img = aug_img.transpose(PIL.Image.ROTATE_180)
-
-        if self.verbose >= 2:
-            print("    run_impl.postprocess", timeit.default_timer() - t)
-            # aug_img.save(Path(results_dir) / 'aug_{}.jpg'.format(align))
-            # aug_img.save(Path(results_dir) / 'aug_{}_100.jpg'.format(align), quality = 100)
-            t = timeit.default_timer()
 
         if align and not process_2_sides:
             hom = postprocess.find_transformation(lines, (aug_img.width, aug_img.height))
@@ -360,14 +312,9 @@ class BrailleInference:
                 lines = postprocess.boxes_to_lines(boxes, labels, lang=lang)
                 self.refine_lines(lines)
                 aug_gt_rects = postprocess.transform_rects(aug_gt_rects, hom)
-            if self.verbose >= 2:
-                print("    run_impl.align", timeit.default_timer() - t)
-                # aug_img.save(Path(results_dir) / 'aligned_{}.jpg'.format(align))
-                # aug_img.save(Path(results_dir) / 'aligned_{}_100.jpg'.format(align), quality = 100)
-                t = timeit.default_timer()
         else:
             hom = None
-
+            
         results_dict = {
             'image': aug_img,
             'best_idx': best_idx,
@@ -376,59 +323,22 @@ class BrailleInference:
             'homography': hom.tolist() if hom is not None else hom,
         }
 
-        if draw:
-            results_dict.update(self.draw_results(aug_img, boxes, lines, labels, scores, False, draw_refined))
-            if process_2_sides:
-                aug_img = aug_img.transpose(PIL.Image.FLIP_LEFT_RIGHT)
-                results_dict.update(self.draw_results(aug_img, boxes2, lines2, labels2, scores2, True, draw_refined))
-            if self.verbose >= 2:
-                print("    run_impl.draw", timeit.default_timer() - t)
-
+        results_dict.update(self.draw_results(aug_img, boxes, lines, labels, scores, False, draw_refined))
+        
         return results_dict
 
     def draw_results(self, aug_img, boxes, lines, labels, scores, reverse_page, draw_refined):
         suff = '.rev' if reverse_page else ''
         aug_img = copy.deepcopy(aug_img)
         draw = PIL.ImageDraw.Draw(aug_img)
-        font_fn = str(Path(__file__).parent / "arial.ttf")
-        fntA = PIL.ImageFont.truetype(font_fn, 20)
-        fntErr = PIL.ImageFont.truetype(font_fn, 12)
-        out_text = []
-        out_braille = []
         for ln in lines:
-            if ln.has_space_before:
-                out_text.append('')
-                out_braille.append('')
-            s = ''
-            s_brl = ''
             for ch in ln.chars:
-                if ch.char.startswith('~') and not (draw_refined & self.DRAW_FULL_CHARS):
-                    ch.char = '~?~'
-                # if ch.char.startswith('~'):
-                #     ch.char = lt.int_to_unicode(ch.label)
-                s += ' ' * ch.spaces_before + ch.char
-                s_brl += lt.int_to_unicode(0) * ch.spaces_before + lt.int_to_unicode(ch.label)
-                if draw_refined & self.DRAW_ORIGINAL:
-                    ch_box = ch.original_box
-                    draw.rectangle(list(ch_box), outline='blue')
-                if (draw_refined & self.DRAW_BOTH) != self.DRAW_ORIGINAL:
-                    ch_box = ch.refined_box
-                    if draw_refined & self.DRAW_REFINED:
-                        draw.rectangle(list(ch_box), outline='green')
-                if ch.char.startswith('~'):
-                    draw.text((ch_box[0], ch_box[3]), ch.char, font=fntErr, fill="black")
-                else:
-                    draw.text((ch_box[0]+5,ch_box[3]-7), ch.char, font=fntA, fill="black")
-                #score = scores[i].item()
-                #score = '{:.1f}'.format(score*10)
-                #draw.text((box[0],box[3]+12), score, font=fnt, fill='green')
-            out_text.append(s)
-            out_braille.append(s_brl)
+                draw.rectangle(list(ch.refined_box), outline='green')
         return {
             'labeled_image' + suff: aug_img,
             'lines' + suff: lines,
-            'text' + suff: out_text,
-            'braille' + suff: out_braille,
+            'text' + suff: "",
+            'braille' + suff: [],
             'dict' + suff: self.to_dict(aug_img, lines, draw_refined),
             'boxes' + suff: boxes,
             'labels' + suff: labels,
@@ -449,7 +359,7 @@ class BrailleInference:
             for ch in ln.chars:
                 ch_box = ch.refined_box if (draw_refined & self.DRAW_BOTH) != self.DRAW_ORIGINAL else ch.original_box
                 shape = {
-                    "label": ch.labeling_char,
+                    "label": ch.label,
                     "points": [[ch_box[0], ch_box[1]],
                                [ch_box[2], ch_box[3]]],
                     "shape_type": "rectangle",
@@ -464,30 +374,66 @@ class BrailleInference:
         return res
 
     def save_results(self, result_dict, reverse_page, results_dir, filename_stem, save_development_info):
-        suff = '.rev' if reverse_page else ''
-        save_development_info = True
-        if save_development_info and not reverse_page:
-            labeled_image_filename = filename_stem + '.labeled' + suff + '.jpg'
-            result_dict['image' + suff].save(Path(results_dir) / labeled_image_filename)
-            json_path = Path(results_dir) / (filename_stem + '.labeled' + suff + '.json')
-            result_dict['dict']['imagePath'] = labeled_image_filename
-            with open(json_path, 'w') as opened_json:
-                json.dump(result_dict['dict'], opened_json, sort_keys=False, indent=4)
-        marked_image_path = Path(results_dir) / (filename_stem + '.marked' + suff + '.jpg')
-        recognized_text_path = Path(results_dir) / (filename_stem + '.marked' + suff + '.txt')
-        recognized_braille_path = Path(results_dir) / (filename_stem + '.marked' + suff + '.brl')
-        result_dict['labeled_image' + suff].save(marked_image_path)
-        with open(recognized_text_path, encoding='utf-8', mode='w') as f:
-            for s in result_dict['text' + suff]:
-                f.write(s)
-                f.write('\n')
-        with open(recognized_braille_path, encoding='utf-8', mode='w') as f:
-            for s in result_dict['braille' + suff]:
-                f.write(s)
-                f.write('\n')
-        return str(marked_image_path), str(recognized_text_path), str(recognized_braille_path), result_dict['text' + suff]
+        suff = ".rev" if reverse_page else ""
+        
+        data_dir = Path(results_dir) / "data"
+        
+        # 각 디렉토리 경로 설정
+        img_dir = Path(data_dir) / "images"
+        json_dir = Path(data_dir) / "annotations"
 
+        # 디렉토리가 존재하지 않으면 생성
+        data_dir.mkdir(parents=True, exist_ok=True)
+        
+        img_dir.mkdir(parents=True, exist_ok=True)
+        json_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 경로 설정
+        uuid_str = str(self.uuid_int)
+        marked_image_path = img_dir / (uuid_str + ".jpg")
+        json_path = json_dir / (uuid_str + ".json")
+        
+        # 이미지 저장
+        result_dict["labeled_image" + suff].save(marked_image_path)
+    
+        # JSON 파일 저장
+        boxes = []
+        labels = []
+        
+        for line in result_dict["lines"]:
+            boxes.append([ch.refined_box for ch in line.chars])
+            labels.append([ch.label for ch in line.chars])
+                
+        # 한국 시간대 설정
+        kst = pytz.timezone('Asia/Seoul')
 
+        # 현재 한국 시간 가져오기
+        current_time_kst = datetime.datetime.now(kst)
+        json_result = {
+            "id": self.uuid_int,
+            "image_path": str(marked_image_path),
+            "date": current_time_kst.strftime("%Y-%m-%d %H:%M:%S"),
+            "prediction": {
+                "boxes": None,
+                "labels": None,
+                "brl": None,
+                "text": None
+            },
+            "correction": {
+                "boxes": None,
+                "labels": None,
+                "brl": None,
+                "text": None
+            },
+        }
+        
+        json_result = refine_json.main(json_result, boxes, labels)
+        
+        with open(json_path, "w", encoding='utf-8') as f:
+            json.dump(json_result, f, indent=4, ensure_ascii=False)
+        
+        return json_result
+    
     def run_and_save(self, img, results_dir, target_stem, lang, extra_info, draw_refined,
                      remove_labeled_from_filename, find_orientation, align_results, process_2_sides, repeat_on_aligned,
                      save_development_info=True):
@@ -502,40 +448,12 @@ class BrailleInference:
                                process_2_sides=process_2_sides, align_results=align_results, repeat_on_aligned=repeat_on_aligned)
         if result_dict is None:
             return None
-        if self.verbose >= 2:
-            print("run_and_save.run", timeit.default_timer() - t)
-            t = timeit.default_timer()
 
         os.makedirs(results_dir, exist_ok=True)
-        if target_stem is None:
-            assert isinstance(img, (str, Path))
-            target_stem = Path(img).stem
-        if remove_labeled_from_filename and target_stem.endswith('.labeled'):
-            target_stem = target_stem[: -len('.labeled')]
-        while (Path(results_dir) / (target_stem + '.marked.jpg')).exists():
-            target_stem += "(dup)"
 
-        if save_development_info:
-            protocol_text_path = Path(results_dir) / (target_stem + '.protocol' + '.txt')
-            with open(protocol_text_path, 'w') as f:
-                info = OrderedDict(
-                    ver = '20200816',
-                    best_idx = result_dict['best_idx'],
-                    err_scores = result_dict['err_scores'],
-                    homography = result_dict['homography'],
-                    model_weights = self.impl.model_weights_fn,
-                )
-                if extra_info:
-                    info.update(extra_info)
-                json.dump(info, f, sort_keys=False, indent=4)
-
-        results = [self.save_results(result_dict, False, results_dir, target_stem, save_development_info)]
-        if process_2_sides:
-            results += [self.save_results(result_dict, True, results_dir, target_stem, save_development_info)]
-
-        if self.verbose >= 2:
-            print("run_and_save.save results", timeit.default_timer() - t)
-        return results
+        self.result = self.save_results(result_dict, False, results_dir, target_stem, save_development_info)
+      
+        return self.result
 
     def process_dir_and_save(self, img_filename_mask, results_dir, lang, extra_info, draw_refined,
                              remove_labeled_from_filename, find_orientation, process_2_sides, align_results,
@@ -600,7 +518,7 @@ class BrailleInference:
                         repeat_on_aligned=repeat_on_aligned,
                         save_development_info=save_development_info)
                     if ith_result is None:
-                        print('Error processing file: ' + str(img_file))
+                        # print('Error processing file: ' + str(img_file))
                         continue
                     result_list += ith_result
         return result_list

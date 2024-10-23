@@ -9,7 +9,7 @@ from pathlib import Path
 import PIL.Image
 
 import L1_OCR.local_config as local_config
-import L1_OCR.model.infer_retinanet_modified as infer_retinanet
+import L1_OCR.model.infer_retinanet as infer_retinanet
 
 model_weights = 'model.t7'
 
