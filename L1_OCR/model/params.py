@@ -17,7 +17,7 @@ params = AttrDict(
         class_as_6pt=False,    # классификация присутствия каждой точки в рамке отдельно
         batch_size = 12,
         net_hw = (416, 416),
-        rect_margin = 0.3, #  every of 4 margions to char width
+        rect_margin = 0.3, #  every of 4 margins to char width
         max_std = 0.1,
         train_list_file_names = [
             #r'DSBI/data/val_li2.txt',
