@@ -8,7 +8,7 @@ from pathlib import Path
 import PIL.Image
 
 import L1_OCR.local_config as local_config
-import L1_OCR.model.infer_retinanet_modified as infer_retinanet
+import L1_OCR.model.infer_retinanet as infer_retinanet
 
 def run_ocr(image):
     model_weights = 'model.t7'
@@ -24,14 +24,14 @@ def run_ocr(image):
     results_dir = local_config.data_path
 
     recognizer.run_and_save(image, results_dir, target_stem=None,
-                                        lang='RU', extra_info=None,
-                                        draw_refined=recognizer.DRAW_NONE,
-                                        remove_labeled_from_filename=False,
-                                        find_orientation=False, # 90도 회전해서 올바른 방향 찾기
-                                        align_results=True,
-                                        process_2_sides=False,
-                                        repeat_on_aligned=False,
-                                        save_development_info=False)
+                                               lang='RU', extra_info=None,
+                                               draw_refined=recognizer.DRAW_NONE,
+                                               remove_labeled_from_filename=False,
+                                               find_orientation=False,
+                                               align_results=True,
+                                               process_2_sides=False,
+                                               repeat_on_aligned=False,
+                                               save_development_info=False)
 
-    print("result: ", recognizer.get_result())
+    # print("result: ", recognizer.get_result())
     return recognizer.get_result()

@@ -6,9 +6,10 @@ Local application for Angelina Braille Reader inference
 import argparse
 import os
 from pathlib import Path
+import PIL.Image
 
-import local_config
-import model.infer_retinanet_modified as infer_retinanet
+import L1_OCR.local_config as local_config
+import L1_OCR.model.infer_retinanet as infer_retinanet
 
 model_weights = 'model.t7'
 
@@ -58,7 +59,9 @@ else:
                                                repeat_on_aligned=False,
                                                save_development_info=False)
     elif Path(args.input).suffix in ('.jpg', '.jpe', '.jpeg', '.png', '.gif', '.svg', '.bmp'):
-        recognizer.run_and_save(args.input, results_dir, target_stem=None,
+        # img = PIL.Image.open(args.input)
+        img_path = args.input
+        recognizer.run_and_save(img_path, results_dir, target_stem=None,
                                                lang=args.lang, extra_info=None,
                                                draw_refined=recognizer.DRAW_NONE,
                                                remove_labeled_from_filename=False,
@@ -71,10 +74,3 @@ else:
         print('Incorrect file extention: ' + Path(args.input).suffix + ' . Only images, .pdf and .zip files allowed')
         exit()
 print('Done. Results are saved in ' + str(results_dir))
-
-
-def run_ocr(image):
-    recognizer = infer_retinanet.BrailleInference(
-    params_fn=os.path.join(local_config.data_path, 'weights', 'param.txt'),
-    model_weights_fn=os.path.join(local_config.data_path, 'weights', model_weights),
-    create_script=None)

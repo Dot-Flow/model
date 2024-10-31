@@ -3,6 +3,7 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.common.by import By
 import time
+import json
 
 
 def translate(input_brl_list):
@@ -34,16 +35,20 @@ def translate(input_brl_list):
     # output_box = driver.find_element(By.ID, "braille")
     output_box = driver.find_element(By.ID, "plain")
     result_text = output_box.text  # 결과 텍스트 가져오기
+    result_text_list = result_text.split("\n")
 
-    print(f"입력 텍스트: {input_brl}\n변환된 점자: {result_text}")
+    print(f"입력 텍스트: {input_brl}\n변환된 점자: {result_text_list}")
     
     # 브라우저 종료
     driver.quit()
     
-    return result_text
+    return result_text_list
 
 if __name__ == "__main__":
-    with open("OCRloop/L2_BrailleToText/KakaoTalk_20241008_234355161_04.marked.txt", "r", encoding="utf-8") as f:
-        for line in f:
-            brl = line.strip()
-            translate(brl)
+    with open("test.json", "r", encoding="utf-8") as f:
+        json_data = json.load(f)
+    brl_list = json_data['prediction']['brl']
+    translated_text_list = translate(brl_list)
+    json_data["prediction"]["text"] = translated_text_list
+    with open("test.json", "w", encoding="utf-8") as f:
+        json.dump(json_data, f, ensure_ascii=False, indent=4)

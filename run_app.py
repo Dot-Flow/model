@@ -2,7 +2,7 @@ import L1_OCR.run_ocr_app as run_ocr_app
 import L2_BrailleToText.brl_to_txt as b2t
 import L3_ContextualErrorCorrection.contextual_error_correction as cec
 import L4_TextToBraille.txt_to_brl as t2b
-import L5_FeedbackGenerator.feedback_gen as fg
+# import L5_FeedbackGenerator.feedback_gen as fg
 
 import logging
 import json
@@ -73,8 +73,8 @@ def proccess_L3_ContextualErrorCorrection(extracted_json):
         return jsonify({'error': '서버 오류 발생'}), 500
 
 @app.route('/L3_ContextualErrorCorrection', methods=['POST'])
-def L3_ContextualErrorCorrection():
-    extracted_json = proccess_L3_ContextualErrorCorrection(request.get_json())
+def L3_ContextualErrorCorrection(extracted_json):
+    extracted_json = proccess_L3_ContextualErrorCorrection(extracted_json)
     response = json.dumps({'corrected_text': extracted_json['correction']['text']}, ensure_ascii=False)
     return Response(response, content_type='application/json; charset=utf-8')
 
@@ -95,16 +95,9 @@ def proccess_L4_TextToBraille(extracted_json):
     
 @app.route('/L4_TextToBraille', methods=['POST'])
 def L4_TextToBraille(extracted_json):
-    extracted_json = proccess_L4_TextToBraille(request.get_json())
+    extracted_json = proccess_L4_TextToBraille(extracted_json)
     response = json.dumps({'brl': extracted_json['correction']['brl']}, ensure_ascii=False)
     return Response(response, content_type='application/json; charset=utf-8')
-
-
-@app.route('/L5_FeedbackGenerator', methods=['POST'])
-def L5_FeedbackGenerator():
-    extracted_json = request.get_json()
-    fg.feedback_gen(extracted_json)
-    return jsonify({'message': 'Feedback generated'})
 
 
 # curl -X POST -F "image=@kakao/KakaoTalk_20241008_234355161_04.jpg" http://127.0.0.1:5000/run_ocr_loop
@@ -115,20 +108,21 @@ def run_ocr_loop():
     input_image = request.files['image']
     if input_image is None:
         return jsonify({'error': '이미지 파일이 필요합니다'}), 400
-    image = PIL.Image.open(input_image)
+    image = input_image
     extracted_json = proccess_L1_OCR(image)
-    extracted_json = proccess_L2_BrailleToText(extracted_json)
+    return Response(json.dumps(extracted_json, ensure_ascii=False), content_type='application/json; charset=utf-8')
+    # extracted_json = proccess_L2_BrailleToText(extracted_json)
     
     # GPT api 돈 없어서 일단 패스
     # extracted_json = proccess_L3_ContextualErrorCorrection(extracted_json)
-    extracted_json['correction']['text'] = extracted_json['prediction']['text']
-    with open('test.json', 'w') as f:
-        json.dump(extracted_json, f, ensure_ascii=False, indent=4)
-    extracted_json = proccess_L4_TextToBraille(extracted_json)
+    # extracted_json['correction']['text'] = extracted_json['prediction']['text']
+    # with open('test.json', 'w') as f:
+    #     json.dump(extracted_json, f, ensure_ascii=False, indent=4)
+    # extracted_json = proccess_L4_TextToBraille(extracted_json)
     
-    response = json.dumps(extracted_json, ensure_ascii=False)
+    # response = json.dumps(extracted_json, ensure_ascii=False)
     
-    return Response(response, content_type='application/json; charset=utf-8')
+    # return Response(response, content_type='application/json; charset=utf-8')
 
 if __name__ == '__main__':
     app.run(debug=False)

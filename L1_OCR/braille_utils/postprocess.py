@@ -6,7 +6,6 @@ import PIL
 
 from braille_utils import letters
 from braille_utils import label_tools as lt
-# from braille_utils.postprocess_liblouis import interpret_line_liblouis
 
 
 class LineChar:
@@ -25,7 +24,7 @@ class LineChar:
 
 
 class Line:
-    STEP_TO_W = 1.25
+    STEP_TO_W = 1.4 # 1.25 -> 1.4
     LINE_THR = 0.6
     AVG_PERIOD = 5 # для аппроксимации при коррекции
     AVG_APPROX_DIST = 3 # берутся точки с интервалос не менее 2, т.е. 0я и 3я или 1я и 4я
@@ -94,7 +93,7 @@ class Line:
                 step = (curr_char.refined_box[2] - curr_char.refined_box[0]) * self.STEP_TO_W
                 prev_char = self.chars[i-1]
                 curr_char.spaces_before = max(0, round(0.5 * ((curr_char.refined_box[0] + curr_char.refined_box[2]) - (prev_char.refined_box[0] + prev_char.refined_box[2])) / step) - 1)
-
+    
 
 def get_compareble_y(line1, line2):
     line1, line2, sign = (line1, line2, 1) if line1.length > line2.length else (line2, line1, -1)
@@ -122,6 +121,7 @@ def _sort_lines(lines):
         else:
             ln.mean_slip = 0
     return sorted(lines, key = cmp_to_key(_cmp_lines))
+
 
 
 def interpret_line_RU(line, lang, mode = None):
@@ -739,6 +739,13 @@ def transform_rects(rects, hom):
             for x in zip(rects, shifts)
         ]
     return rects
+
+def add_blanks(lines):
+    for ln in lines:
+        for ch in ln.chars:
+            if ch.spaces_before:
+                ch.char = ' ' * ch.spaces_before + ch.char
+    return lines
 
 
 if __name__ == '__main__':
