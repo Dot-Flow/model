@@ -77,7 +77,7 @@ def make_spaces_by_lines(box_lines, label_lines, image_path):
             
             pre_box = box_line[i-1]
             cur_box = box_line[i]
-            spaces = int((cur_box[0] - pre_box[2]) / (avg_width * 0.9))
+            spaces = int((cur_box[0] - pre_box[2]) / (avg_width * 0.95))
             if spaces > 0:
                 new_boxes = make_new_boxes(spaces, pre_box, slope, avg_width)
                 for new_box in new_boxes:

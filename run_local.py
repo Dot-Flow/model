@@ -59,8 +59,9 @@ else:
                                                repeat_on_aligned=False,
                                                save_development_info=False)
     elif Path(args.input).suffix in ('.jpg', '.jpe', '.jpeg', '.png', '.gif', '.svg', '.bmp'):
-        img = PIL.Image.open(args.input)
-        recognizer.run_and_save(img, results_dir, target_stem=None,
+        # img = PIL.Image.open(args.input)
+        img_path = args.input
+        recognizer.run_and_save(img_path, results_dir, target_stem=None,
                                                lang=args.lang, extra_info=None,
                                                draw_refined=recognizer.DRAW_NONE,
                                                remove_labeled_from_filename=False,

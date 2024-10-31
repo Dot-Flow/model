@@ -281,7 +281,7 @@ class BrailleInference:
         aug_img = data.unify_shape(aug_img)
         input_tensor = self.preprocessor.to_normalized_tensor(aug_img, device=self.impl.device)
         input_tensor_rotated = torch.tensor(0).to(self.impl.device)
-
+        
         aug_img_rot = None
         if find_orientation:
             np_img_rot = np.rot90(np_img, 1, (0,1))
@@ -373,7 +373,7 @@ class BrailleInference:
                }
         return res
 
-    def save_results(self, result_dict, reverse_page, results_dir, filename_stem, save_development_info):
+    def save_results(self, result_dict, reverse_page, results_dir, filename_stem, save_development_info, img_path):
         suff = ".rev" if reverse_page else ""
         
         data_dir = Path(results_dir) / "data"
@@ -381,21 +381,25 @@ class BrailleInference:
         # 각 디렉토리 경로 설정
         img_dir = Path(data_dir) / "images"
         json_dir = Path(data_dir) / "annotations"
-
+        
         # 디렉토리가 존재하지 않으면 생성
         data_dir.mkdir(parents=True, exist_ok=True)
-        
         img_dir.mkdir(parents=True, exist_ok=True)
         json_dir.mkdir(parents=True, exist_ok=True)
         
         # 경로 설정
-        uuid_str = str(self.uuid_int)
-        marked_image_path = img_dir / (uuid_str + ".jpg")
-        json_path = json_dir / (uuid_str + ".json")
+        # uuid_str = str(self.uuid_int)
+        # marked_image_path = img_dir / (uuid_str + ".jpg")
+        # json_path = json_dir / (uuid_str + ".json")
+        print("img_path: ", img_path)
+        # img_name = Path(img_path).name
+        img_name = Path(img_path.filename).name
+        marked_image_path = img_dir / img_name
+        json_path = json_dir / img_name.replace(".jpg", ".json")
         
         # 이미지 저장
         result_dict["labeled_image" + suff].save(marked_image_path)
-    
+        
         # JSON 파일 저장
         boxes = []
         labels = []
@@ -403,10 +407,10 @@ class BrailleInference:
         for line in result_dict["lines"]:
             boxes.append([ch.refined_box for ch in line.chars])
             labels.append([ch.label for ch in line.chars])
-                
+        
         # 한국 시간대 설정
         kst = pytz.timezone('Asia/Seoul')
-
+        
         # 현재 한국 시간 가져오기
         current_time_kst = datetime.datetime.now(kst)
         json_result = {
@@ -434,7 +438,7 @@ class BrailleInference:
         
         return json_result
     
-    def run_and_save(self, img, results_dir, target_stem, lang, extra_info, draw_refined,
+    def run_and_save(self, img_path, results_dir, target_stem, lang, extra_info, draw_refined,
                      remove_labeled_from_filename, find_orientation, align_results, process_2_sides, repeat_on_aligned,
                      save_development_info=True):
         """
@@ -443,6 +447,8 @@ class BrailleInference:
             img is image, not filename. When target_stem is None, it is taken from img stem.
         """
         t = timeit.default_timer()
+        img = PIL.Image.open(img_path)
+        
         result_dict = self.run(img, lang=lang, draw_refined=draw_refined,
                                find_orientation=find_orientation,
                                process_2_sides=process_2_sides, align_results=align_results, repeat_on_aligned=repeat_on_aligned)
@@ -450,9 +456,9 @@ class BrailleInference:
             return None
 
         os.makedirs(results_dir, exist_ok=True)
-
-        self.result = self.save_results(result_dict, False, results_dir, target_stem, save_development_info)
-      
+        print("여기?")
+        self.result = self.save_results(result_dict, False, results_dir, target_stem, save_development_info, img_path)
+        
         return self.result
 
     def process_dir_and_save(self, img_filename_mask, results_dir, lang, extra_info, draw_refined,
