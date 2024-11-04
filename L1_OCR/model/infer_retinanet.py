@@ -392,8 +392,10 @@ class BrailleInference:
         # marked_image_path = img_dir / (uuid_str + ".jpg")
         # json_path = json_dir / (uuid_str + ".json")
         print("img_path: ", img_path)
-        # img_name = Path(img_path).name
-        img_name = Path(img_path.filename).name
+        try:
+            img_name = Path(img_path).name
+        except:
+            img_name = Path(img_path.filename).name
         marked_image_path = img_dir / img_name
         json_path = json_dir / img_name.replace(".jpg", ".json")
         
@@ -413,10 +415,13 @@ class BrailleInference:
         
         # 현재 한국 시간 가져오기
         current_time_kst = datetime.datetime.now(kst)
+        print("Height: ", result_dict["dict" + suff]["imageHeight"])
         json_result = {
             "id": self.uuid_int,
             "image_path": str(marked_image_path),
             "date": current_time_kst.strftime("%Y-%m-%d %H:%M:%S"),
+            "imageWidth": result_dict["dict" + suff]["imageWidth"],
+            "imageHeight": result_dict["dict" + suff]["imageHeight"],
             "prediction": {
                 "boxes": None,
                 "labels": None,
@@ -456,7 +461,7 @@ class BrailleInference:
             return None
 
         os.makedirs(results_dir, exist_ok=True)
-        print("여기?")
+        
         self.result = self.save_results(result_dict, False, results_dir, target_stem, save_development_info, img_path)
         
         return self.result

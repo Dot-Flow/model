@@ -2,6 +2,8 @@
     "id": 85791617493317083833299468506476208990,
     "image_path": "kakao/data/images/KakaoTalk_20241008_234355161_07.jpg",
     "date": "2024-10-27 12:40:57",
+    "ImageWidth": null,
+    "ImageHeight": null,
     "prediction": {
         "boxes": [
             [
